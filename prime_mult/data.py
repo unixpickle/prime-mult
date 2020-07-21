@@ -30,6 +30,8 @@ class PrimeProductDataset(torch.utils.data.IterableDataset):
         while True:
             p = number.getPrime(self.num_bits)
             q = number.getPrime(self.num_bits)
+            if p > q:
+                p, q = q, p
             pq = p * q
             inputs = binary_number(self.num_bits, p) + binary_number(self.num_bits, q)
             outputs = binary_number(self.num_bits * 2, pq)
