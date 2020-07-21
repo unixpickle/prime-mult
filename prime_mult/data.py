@@ -6,12 +6,14 @@ from Crypto.Util import number
 import torch
 
 
-def make_data_loader(num_bits, batch_size):
+def make_data_loader(num_bits, batch_size, num_workers=4):
     """
     Create a data loader for prime multiplication problems.
     """
     dataset = PrimeProductDataset(num_bits)
-    return torch.utils.data.DataLoader(dataset, batch_size=batch_size, num_workers=4)
+    return torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size, num_workers=num_workers
+    )
 
 
 class PrimeProductDataset(torch.utils.data.IterableDataset):

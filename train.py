@@ -16,7 +16,9 @@ def main():
 
     model = named_model(args.model_name, args.num_bits)
     model.to(device)
-    data = iter(make_data_loader(args.num_bits, args.batch_size))
+    data = iter(
+        make_data_loader(args.num_bits, args.batch_size, num_workers=args.data_workers)
+    )
     opt = optim.Adam(model.parameters(), lr=args.lr)
 
     for i in itertools.count():
@@ -48,6 +50,9 @@ def arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--num-bits", help="number of bits in primes", type=int, default=32
+    )
+    parser.add_argument(
+        "--data-workers", help="number of dataset workers", type=int, default=4
     )
     parser.add_argument("--batch-size", help="SGD batch size", type=int, default=32)
     parser.add_argument("--lr", help="Adam learning rate", type=float, default=1e-3)
