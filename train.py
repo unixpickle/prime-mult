@@ -28,22 +28,34 @@ def main():
 
         outputs = model(inputs)
         loss = F.binary_cross_entropy_with_logits(outputs, targets)
-        acc = compute_accuracy(outputs, targets)
+        bit_acc = compute_bit_accuracy(outputs, targets)
+        num_acc = compute_number_accuracy(outputs, targets)
         opt.zero_grad()
         loss.backward()
         opt.step()
 
-        print(f"step {i:06}: loss={loss.item()} acc={acc.item()}")
+        print(
+            f"step {i:06}: loss={loss.item():.3f}"
+            f" bit_acc={bit_acc.item():.3f}"
+            f" num_acc={num_acc.item():.3f}"
+        )
 
         if i and not i % args.save_interval:
             print("saving...")
             torch.save(model.state_dict(), f"model_{i:06}.pt")
 
 
-def compute_accuracy(outputs, targets):
+def compute_bit_accuracy(outputs, targets):
     bool_out = outputs > 0
     bool_targ = targets > 0.5
     return (bool_out == bool_targ).float().mean()
+
+
+def compute_number_accuracy(outputs, targets):
+    bool_out = outputs > 0
+    bool_targ = targets > 0.5
+    num_correct = (bool_out == bool_targ).long().sum(-1)
+    return (num_correct == targets.shape[-1]).float().mean()
 
 
 def arg_parser():
