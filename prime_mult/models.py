@@ -7,6 +7,8 @@ def named_model(name, num_bits):
         return MLPFactorizer(num_bits)
     elif name == "siren":
         return SIRENFactorizer(num_bits)
+    elif name == "gated":
+        return GatedFactorizer(num_bits)
     elif name == "hardcoded":
         return HardCodedFactorizer(num_bits)
     raise ValueError(f"no such model: {name}")
@@ -27,6 +29,29 @@ class MLPFactorizer(nn.Module):
 
     def forward(self, x):
         return self.sequential(x)
+
+
+class GatedFactorizer(nn.Module):
+    def __init__(self, num_bits, d=1024):
+        super().__init__()
+        self.sequential = nn.Sequential(
+            nn.Linear(num_bits * 2, d * 2),
+            GatedAct(),
+            nn.Linear(d, d * 2),
+            GatedAct(),
+            nn.Linear(d, d * 2),
+            GatedAct(),
+            nn.Linear(d, num_bits * 2),
+        )
+
+    def forward(self, x):
+        return self.sequential(x)
+
+
+class GatedAct(nn.Module):
+    def forward(self, x):
+        size = x.shape[1] // 2
+        return x[:, :size] * torch.sigmoid(x[:, size:])
 
 
 class SIRENFactorizer(nn.Module):
