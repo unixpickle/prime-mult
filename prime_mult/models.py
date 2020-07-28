@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from . import matrix_util
+
 
 def named_model(name, num_bits):
     if name == "mlp":
@@ -131,19 +133,19 @@ class PreInitMLP(nn.Module):
 
         If the input is <p, q>, the output is <p*q_0, p*q_1 << 1, p*q_2 << 2, ...>.
         """
-        layer = nn.Linear(self.num_bits * 2, 2 * self.num_bits ** 2)
-        w = layer.weight.detach()
-        b = layer.bias.detach()
-        w.zero_()
-        b.zero_()
-        for i in range(self.num_bits):
-            for j in range(self.num_bits):
-                # i is index in q, j is index in p.
-                out_idx = i * (1 + self.num_bits * 2) + j
-                w[out_idx, j] = 8.0
-                w[out_idx, i + self.num_bits] = 8.0
-                b[out_idx] = -12.0
-        return nn.Sequential(layer, nn.Sigmoid())
+
+        def mask_function(inputs, bias):
+            p = inputs[: self.num_bits]
+            q = inputs[self.num_bits :]
+            results = []
+            for i, q_i in enumerate(q):
+                results.append(torch.zeros(i).to(inputs))
+                results.append((p + q) * 8.0 - bias * 12.0)
+                results.append(torch.zeros(self.num_bits - i).to(inputs))
+            return torch.cat(results, dim=0)
+
+        linear_layer = matrix_util.create_linear_layer(mask_function, self.num_bits * 2)
+        return nn.Sequential(linear_layer, nn.Sigmoid())
 
     def addition_layer(self, depth):
         """
@@ -161,39 +163,22 @@ class PreInitMLP(nn.Module):
         The input will be of the form <a1, b1, a2, b2, ...>, where each number
         is self.num_bits * 2 bits, and we want to compute <a1 + b1, ...>.
 
-        The output will be of the form <*inputs, c1, p1, k1, c2, p2, k2, ...>,
+        The output will be of the form <c1, p1, k1, c2, p2, k2, ...>,
         where cN, pN, and kN are carry, propagate, and kill bits.
         """
+
+        def bit_function(inputs, bias):
+            a = inputs[: self.num_bits * 2]
+            b = inputs[self.num_bits * 2 :]
+            carry = (a + b) * 8.0 + bias * 12.0
+            prop = (a + b) * 8.0 - bias * 4.0
+            kill = bias * 4.0 - (a + b) * 8.0
+            return torch.cat([carry, prop, kill], dim=0)
+
         num_pairs = self.num_bits / (2 ** (depth + 1))
-        in_dims = self.num_bits * 4 * num_pairs
-        layer = nn.Linear(in_dims, in_dims + 3 * num_pairs * self.num_bits * 2)
-        w = layer.weight.detach()
-        b = layer.bias.detach()
-        w.zero_()
-        b.zero_()
-
-        # Identity for inputs.
-        for i in range(in_dims):
-            w[in_dims, in_dims] = 1.0
-
-        for i in range(num_pairs):
-            for j in range(self.num_bits * 2):
-                a_idx = self.num_bits * 4 * i + j
-                b_idx = a_idx + self.num_bits * 2
-                carry_idx = in_dims + self.num_bits * 6 * i + j
-                prop_idx = carry_idx + self.num_bits * 2
-                kill_idx = prop_idx + self.num_bits * 2
-                w[carry_idx, a_idx] = 8.0
-                w[carry_idx, b_idx] = 8.0
-                b[carry_idx] = -12.0
-                w[prop_idx, a_idx] = 8.0
-                w[prop_idx, b_idx] = 8.0
-                b[prop_idx] = -4.0
-                w[kill_idx, a_idx] = -8.0
-                w[kill_idx, b_idx] = -8.0
-                b[prop_idx] = 4.0
-
-        return layer
+        linear_layer = matrix_util.create_linear_layer(bit_function, self.num_bits * 4)
+        linear_layer = matrix_util.repeat_block_diagonal(linear_layer, num_pairs)
+        return nn.Sequential(linear_layer, nn.Sigmoid())
 
     def create_xor_and_carry(self, depth):
         """
