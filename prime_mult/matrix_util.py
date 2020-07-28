@@ -27,3 +27,19 @@ def create_linear_layer(lin_fn, num_inputs):
         else:
             layer.bias.detach()[i] = 0
     return layer
+
+
+def repeat_block_diagonal(linear_layer, repeats):
+    num_outputs, num_inputs = linear_layer.weight.shape
+    new_layer = nn.Linear(num_inputs * repeats, num_outputs * repeats)
+    new_layer.weight.detach().zero_()
+    new_layer.bias.detach().zero_()
+    for i in range(repeats):
+        new_layer.bias.detach()[i * num_outputs : (i + 1) * num_outputs].copy_(
+            linear_layer.bias
+        )
+        new_layer.weight.detach()[
+            i * num_outputs : (i + 1) * num_outputs,
+            i * num_inputs : (i + 1) * num_inputs,
+        ].copy_(linear_layer.weight)
+    return new_layer
