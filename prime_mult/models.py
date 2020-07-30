@@ -111,7 +111,7 @@ def _number_to_tensor(num_bits, n):
 
 
 class PreInitMLP(nn.Module):
-    def __init__(self, num_bits):
+    def __init__(self, num_bits, saturation=10.0):
         super().__init__()
 
         log_bits = 1
@@ -125,6 +125,8 @@ class PreInitMLP(nn.Module):
         for i in range(log_bits):
             layers.append(self.addition_layer(i))
         self.network = nn.Sequential(*layers)
+        for param in self.parameters():
+            param.detach().mul_(saturation)
 
     def create_first_layer(self):
         """
@@ -140,7 +142,7 @@ class PreInitMLP(nn.Module):
             results = []
             for i, q_i in enumerate(q):
                 results.append(torch.zeros(i).to(inputs))
-                results.append((p + q_i) * 8.0 - bias * 12.0)
+                results.append((p + q_i) * 2.0 - bias * 3.0)
                 results.append(torch.zeros(self.num_bits - i).to(inputs))
             return torch.cat(results, dim=0)
 
@@ -172,9 +174,9 @@ class PreInitMLP(nn.Module):
         def bit_function(inputs, bias):
             a = inputs[: self.num_bits * 2]
             b = inputs[self.num_bits * 2 :]
-            carry = (a + b) * 8.0 + bias * 12.0
-            prop = (a + b) * 8.0 - bias * 4.0
-            kill = bias * 4.0 - (a + b) * 8.0
+            carry = (a + b) * 2.0 - bias * 3.0
+            prop = (a + b) * 2.0 - bias * 1.0
+            kill = -prop
             return torch.cat([carry, prop, kill], dim=0)
 
         num_pairs = self.num_bits / (2 ** (depth + 1))
@@ -202,15 +204,15 @@ class PreInitMLP(nn.Module):
             k_cur = inputs[bit_idx * 3 + 2]
 
             if bit_idx == 0:
-                next_carry = -4.0 * bias
+                next_carry = -1.0 * bias
             else:
                 c_prev = inputs[(bit_idx - 1) * 3]
                 p_prev = inputs[(bit_idx - 1) * 3 + 1]
                 # (c_prev OR p_prev) AND p_cur
-                next_carry = 8.0 * (c_prev + p_prev) - 20.0 * bias + 16.0 * p_cur
+                next_carry = 2.0 * (c_prev + p_prev) - 5.0 * bias + 4.0 * p_cur
             result[bit_idx * 3 + 1] = next_carry
 
-            xor = 4.0 * bias - 8.0 * (c_cur + k_cur)
+            xor = 1.0 * bias - 2.0 * (c_cur + k_cur)
             result[bit_idx * 3 + 2] = xor
 
             return torch.stack(result, dim=0)
@@ -233,14 +235,14 @@ class PreInitMLP(nn.Module):
             results = []
             for i in range(self.num_bits * 2):
                 if i == 0:
-                    carry_prev = 0.0
+                    carry_prev = -1.0
                 else:
                     c_prev = inputs[(i - 1) * 3]
                     p_prev = inputs[(i - 1) * 3 + 1]
-                    carry_prev = -4.0 * bias + 8.0 * (c_prev + p_prev)
+                    carry_prev = -1.0 * bias + 2.0 * (c_prev + p_prev)
                 xor_cur = inputs[i * 3 + 2]
-                results.append(carry_prev - xor_cur * 16.0)
-                results.append(xor_cur * 4.0 - carry_prev * 2.0)
+                results.append(carry_prev - xor_cur * 4.0)
+                results.append(xor_cur - carry_prev * 2.0)
             return torch.stack(results, dim=0)
 
         def create_xor(inputs, bias):
@@ -248,7 +250,7 @@ class PreInitMLP(nn.Module):
             results = []
             for i in range(self.num_bits * 2):
                 case1, case2 = bits[i * 2], bits[i * 2 + 1]
-                results.append(8.0 * (case1 + case2) - bias * 4.0)
+                results.append(2.0 * (case1 + case2) - bias * 1.0)
             return torch.stack(results, dim=0)
 
         num_pairs = self.num_bits / (2 ** (depth + 1))
