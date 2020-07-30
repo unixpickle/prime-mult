@@ -20,6 +20,9 @@ def test_pre_init_mlp_4bits():
         )
         > 0.5
     )
-    actual = mlp(inputs) > 0
+    mlp_out = mlp(inputs)
+    actual = mlp_out > 0
     for a, x in zip(actual, expected):
         assert (a == x).all()
+    # Outputs should be very saturated.
+    assert not (mlp_out.abs() < 1.0).any()

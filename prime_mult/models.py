@@ -252,8 +252,8 @@ class PreInitMLP(nn.Module):
                 xor_cur = inputs[i * 3 + 2]  # either 0 or 1
 
                 # compute NOT(carry_prev OR xor_cur)
-                results.append(bias - 3.0 * xor_cur - carry_prev)
-                # compute (carry_prev OR xor_cur)
+                results.append(bias - 4.0 * xor_cur - 2.0 * carry_prev)
+                # compute (carry_prev AND xor_cur)
                 results.append(-7.0 * bias + 6.0 * xor_cur + 2.0 * carry_prev)
             return torch.stack(results, dim=0)
 

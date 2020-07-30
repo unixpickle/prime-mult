@@ -2,6 +2,7 @@
 Random synthetic data generation
 """
 
+import Crypto.Random as Random
 from Crypto.Util import number
 import torch
 
@@ -29,9 +30,13 @@ class PrimeProductDataset(torch.utils.data.IterableDataset):
         self.num_bits = num_bits
 
     def __iter__(self):
+        rng = Random.new()
         while True:
-            p = number.getPrime(self.num_bits)
-            q = number.getPrime(self.num_bits)
+            p = number.getPrime(self.num_bits, randfunc=rng.read)
+            q = number.getPrime(self.num_bits, randfunc=rng.read)
+            if p >= 2 ** self.num_bits or q >= 2 ** self.num_bits:
+                # Workaround a bug in the crypto API.
+                continue
             if p > q:
                 p, q = q, p
             pq = p * q
