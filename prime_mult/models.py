@@ -121,12 +121,17 @@ class PreInitMLP(nn.Module):
             raise ValueError(f"num_bits is {num_bits} but require a power of 2")
 
         self.num_bits = num_bits
-        layers = [self._create_first_layer()]
+        layers = [self.create_first_layer()]
         for i in range(log_bits):
+            if i > 0:
+                layers.append(nn.Sigmoid())
             layers.append(self.addition_layer(i))
         self.network = nn.Sequential(*layers)
         for param in self.parameters():
             param.detach().mul_(saturation)
+
+    def forward(self, x):
+        return self.network(x)
 
     def create_first_layer(self):
         """
@@ -179,7 +184,7 @@ class PreInitMLP(nn.Module):
             kill = -prop
             return torch.cat([carry, prop, kill], dim=0)
 
-        num_pairs = self.num_bits / (2 ** (depth + 1))
+        num_pairs = self.num_bits // (2 ** (depth + 1))
         linear_layer = matrix_util.create_linear_layer(bit_function, self.num_bits * 4)
         linear_layer = matrix_util.repeat_block_diagonal(linear_layer, num_pairs)
         return nn.Sequential(linear_layer, nn.Sigmoid())
@@ -217,7 +222,7 @@ class PreInitMLP(nn.Module):
 
             return torch.stack(result, dim=0)
 
-        num_pairs = self.num_bits / (2 ** (depth + 1))
+        num_pairs = self.num_bits // (2 ** (depth + 1))
         linear_layer = matrix_util.create_linear_layer(bit_function, self.num_bits * 6)
         linear_layer = matrix_util.repeat_block_diagonal(linear_layer, num_pairs)
         return nn.Sequential(linear_layer, nn.Sigmoid())
@@ -253,9 +258,9 @@ class PreInitMLP(nn.Module):
                 results.append(2.0 * (case1 + case2) - bias * 1.0)
             return torch.stack(results, dim=0)
 
-        num_pairs = self.num_bits / (2 ** (depth + 1))
+        num_pairs = self.num_bits // (2 ** (depth + 1))
         lin_1 = matrix_util.create_linear_layer(create_01_and_10, self.num_bits * 6)
         lin_1 = matrix_util.repeat_block_diagonal(lin_1, num_pairs)
         lin_2 = matrix_util.create_linear_layer(create_xor, self.num_bits * 4)
         lin_2 = matrix_util.repeat_block_diagonal(lin_2, num_pairs)
-        return nn.Sequential(lin_1, nn.Sigmoid(), lin_2, nn.Sigmoid())
+        return nn.Sequential(lin_1, nn.Sigmoid(), lin_2)

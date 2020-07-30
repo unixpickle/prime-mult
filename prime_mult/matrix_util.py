@@ -17,7 +17,7 @@ def create_linear_layer(lin_fn, num_inputs):
     for i, x in enumerate(out):
         inputs.grad = None
         bias.grad = None
-        x.backward()
+        x.backward(retain_graph=True)
         if inputs.grad is not None:
             layer.weight.detach()[i] = inputs.grad.float()
         else:
