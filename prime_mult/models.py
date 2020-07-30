@@ -140,7 +140,7 @@ class PreInitMLP(nn.Module):
             results = []
             for i, q_i in enumerate(q):
                 results.append(torch.zeros(i).to(inputs))
-                results.append((p + q) * 8.0 - bias * 12.0)
+                results.append((p + q_i) * 8.0 - bias * 12.0)
                 results.append(torch.zeros(self.num_bits - i).to(inputs))
             return torch.cat(results, dim=0)
 
@@ -152,9 +152,11 @@ class PreInitMLP(nn.Module):
         Create a layer that adds pairs of two binary numbers together, which
         can be applied recursively to add many numbers.
         """
-        # TODO: create carry bit layer
-        # TODO: create xor and carry flags
-        # TODO: compute xor between those flags to compute final sum
+        layers = [self.create_carry_bit_layer(depth)]
+        for i in range(self.num_bits * 2):
+            layers.append(self.create_bit_adder_layer(depth, i))
+        layers.append(self.create_bit_carry_xor_layer(depth))
+        return nn.Sequential(*layers)
 
     def create_carry_bit_layer(self, depth):
         """
@@ -180,35 +182,78 @@ class PreInitMLP(nn.Module):
         linear_layer = matrix_util.repeat_block_diagonal(linear_layer, num_pairs)
         return nn.Sequential(linear_layer, nn.Sigmoid())
 
-    def create_xor_and_carry(self, depth):
+    def create_bit_adder_layer(self, depth, bit_idx):
         """
-        Compute more intermediate values for computing a sum.
+        Create a layer that performs a 1-bit addition on the output of the
+        carry bit layer.
 
-        The inputs are <a1, b1, ..., aN, bN, c1, p1, k1, ..., cN, pN, kN>.
-        The outputs are <a1^b1, carry1, a2^b2, carry2, ...>.
+        The input is of the form <c1, p1, k1, ...>.
+        After each bit is computed, the k will be replaced by the XOR of the
+        two bits, p will be replaced by a flag indicating if a carry from the
+        previous bit has been propagated to the next bit.
+        Thus, (p OR c) gives the true carry bit for the next bit.
         """
+
+        def bit_function(inputs, bias):
+            result = list(inputs)
+
+            c_cur = inputs[bit_idx * 3]
+            p_cur = inputs[bit_idx * 3 + 1]
+            k_cur = inputs[bit_idx * 3 + 2]
+
+            if bit_idx == 0:
+                next_carry = -4.0 * bias
+            else:
+                c_prev = inputs[(bit_idx - 1) * 3]
+                p_prev = inputs[(bit_idx - 1) * 3 + 1]
+                # (c_prev OR p_prev) AND p_cur
+                next_carry = 8.0 * (c_prev + p_prev) - 20.0 * bias + 16.0 * p_cur
+            result[bit_idx * 3 + 1] = next_carry
+
+            xor = 4.0 * bias - 8.0 * (c_cur + k_cur)
+            result[bit_idx * 3 + 2] = xor
+
+            return torch.stack(result, dim=0)
+
         num_pairs = self.num_bits / (2 ** (depth + 1))
-        digit_dims = self.num_bits * 4 * num_pairs
-        in_dims = digit_dims + 3 * num_pairs * self.num_bits * 2
-        out_dims = num_pairs * self.num_bits * 2
-        layer = nn.Linear(in_dims, out_dims)
-        w = layer.weight.detach()
-        b = layer.bias.detach()
-        w.zero_()
-        b.zero_()
+        linear_layer = matrix_util.create_linear_layer(bit_function, self.num_bits * 6)
+        linear_layer = matrix_util.repeat_block_diagonal(linear_layer, num_pairs)
+        return nn.Sequential(linear_layer, nn.Sigmoid())
 
-        for i in range(num_pairs):
-            for j in range(self.num_bits * 2):
-                a_idx = self.num_bits * 4 * i + j
-                b_idx = a_idx + self.num_bits * 2
-                carry_idx = digit_dims + self.num_bits * 6 * i + j
-                prop_idx = carry_idx + self.num_bits * 2
-                kill_idx = prop_idx + self.num_bits * 2
+    def create_bit_carry_xor_layer(self, depth):
+        """
+        Create a layer that turns the output of a chain of bit adders into a
+        final sum between the digits and the carry bits.
+        This performs an XOR, and as such is more than one linear layer.
 
-                # Going from least bit to greatest bit, what we do is:
-                #  - Compute (a ^ b), which is NOT(carry & kill) (just a sum).
-                #  - XOR by current carry flag:
-                #    - For a previous carry flag, we carry if there are no kills
-                #      after the carry flag.
+        Turns <c1, p1, xor1, ...> into <sum1, sum2, ...>.
+        """
 
-                # TODO: this.
+        def create_01_and_10(inputs, bias):
+            results = []
+            for i in range(self.num_bits * 2):
+                if i == 0:
+                    carry_prev = 0.0
+                else:
+                    c_prev = inputs[(i - 1) * 3]
+                    p_prev = inputs[(i - 1) * 3 + 1]
+                    carry_prev = -4.0 * bias + 8.0 * (c_prev + p_prev)
+                xor_cur = inputs[i * 3 + 2]
+                results.append(carry_prev - xor_cur * 16.0)
+                results.append(xor_cur * 4.0 - carry_prev * 2.0)
+            return torch.stack(results, dim=0)
+
+        def create_xor(inputs, bias):
+            bits = list(inputs)
+            results = []
+            for i in range(self.num_bits * 2):
+                case1, case2 = bits[i * 2], bits[i * 2 + 1]
+                results.append(8.0 * (case1 + case2) - bias * 4.0)
+            return torch.stack(results, dim=0)
+
+        num_pairs = self.num_bits / (2 ** (depth + 1))
+        lin_1 = matrix_util.create_linear_layer(create_01_and_10, self.num_bits * 6)
+        lin_1 = matrix_util.repeat_block_diagonal(lin_1, num_pairs)
+        lin_2 = matrix_util.create_linear_layer(create_xor, self.num_bits * 4)
+        lin_2 = matrix_util.repeat_block_diagonal(lin_2, num_pairs)
+        return nn.Sequential(lin_1, nn.Sigmoid(), lin_2, nn.Sigmoid())
