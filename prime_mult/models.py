@@ -13,6 +13,8 @@ def named_model(name, num_bits):
         return GatedFactorizer(num_bits)
     elif name == "hardcoded":
         return HardCodedFactorizer(num_bits)
+    elif name == "preinit":
+        return PreInitMLP(num_bits)
     raise ValueError(f"no such model: {name}")
 
 
@@ -146,9 +148,9 @@ class PreInitMLP(nn.Module):
             q = inputs[self.num_bits :]
             results = []
             for i, q_i in enumerate(q):
-                results.append(torch.zeros(i).to(inputs))
+                results.append(-bias * torch.ones(i).to(inputs))
                 results.append((p + q_i) * 2.0 - bias * 3.0)
-                results.append(torch.zeros(self.num_bits - i).to(inputs))
+                results.append(-bias * torch.ones(self.num_bits - i).to(inputs))
             return torch.cat(results, dim=0)
 
         linear_layer = matrix_util.create_linear_layer(mask_function, self.num_bits * 2)
@@ -172,8 +174,8 @@ class PreInitMLP(nn.Module):
         The input will be of the form <a1, b1, a2, b2, ...>, where each number
         is self.num_bits * 2 bits, and we want to compute <a1 + b1, ...>.
 
-        The output will be of the form <c1, p1, k1, c2, p2, k2, ...>,
-        where cN, pN, and kN are carry, propagate, and kill bits.
+        The output will be of the form <c11, p11, k11, c12, p12, k12, ...>,
+        where cNj, pNj, and kNj are carry, propagate, and kill bits.
         """
 
         def bit_function(inputs, bias):
@@ -182,7 +184,7 @@ class PreInitMLP(nn.Module):
             carry = (a + b) * 2.0 - bias * 3.0
             prop = (a + b) * 2.0 - bias * 1.0
             kill = -prop
-            return torch.cat([carry, prop, kill], dim=0)
+            return torch.stack([carry, prop, kill], dim=-1).view(-1)
 
         num_pairs = self.num_bits // (2 ** (depth + 1))
         linear_layer = matrix_util.create_linear_layer(bit_function, self.num_bits * 4)
@@ -202,7 +204,7 @@ class PreInitMLP(nn.Module):
         """
 
         def bit_function(inputs, bias):
-            result = list(inputs)
+            result = list(inputs * 2 - bias)
 
             c_cur = inputs[bit_idx * 3]
             p_cur = inputs[bit_idx * 3 + 1]
@@ -236,7 +238,7 @@ class PreInitMLP(nn.Module):
         Turns <c1, p1, xor1, ...> into <sum1, sum2, ...>.
         """
 
-        def create_01_and_10(inputs, bias):
+        def create_00_and_11(inputs, bias):
             results = []
             for i in range(self.num_bits * 2):
                 if i == 0:
@@ -245,9 +247,14 @@ class PreInitMLP(nn.Module):
                     c_prev = inputs[(i - 1) * 3]
                     p_prev = inputs[(i - 1) * 3 + 1]
                     carry_prev = -1.0 * bias + 2.0 * (c_prev + p_prev)
-                xor_cur = inputs[i * 3 + 2]
-                results.append(carry_prev - xor_cur * 4.0)
-                results.append(xor_cur - carry_prev * 2.0)
+
+                # carry_prev is either -1, 1, or 3.
+                xor_cur = inputs[i * 3 + 2]  # either 0 or 1
+
+                # compute NOT(carry_prev OR xor_cur)
+                results.append(bias - 3.0 * xor_cur - carry_prev)
+                # compute (carry_prev OR xor_cur)
+                results.append(-7.0 * bias + 6.0 * xor_cur + 2.0 * carry_prev)
             return torch.stack(results, dim=0)
 
         def create_xor(inputs, bias):
@@ -255,11 +262,11 @@ class PreInitMLP(nn.Module):
             results = []
             for i in range(self.num_bits * 2):
                 case1, case2 = bits[i * 2], bits[i * 2 + 1]
-                results.append(2.0 * (case1 + case2) - bias * 1.0)
+                results.append(bias - 2.0 * (case1 + case2))
             return torch.stack(results, dim=0)
 
         num_pairs = self.num_bits // (2 ** (depth + 1))
-        lin_1 = matrix_util.create_linear_layer(create_01_and_10, self.num_bits * 6)
+        lin_1 = matrix_util.create_linear_layer(create_00_and_11, self.num_bits * 6)
         lin_1 = matrix_util.repeat_block_diagonal(lin_1, num_pairs)
         lin_2 = matrix_util.create_linear_layer(create_xor, self.num_bits * 4)
         lin_2 = matrix_util.repeat_block_diagonal(lin_2, num_pairs)

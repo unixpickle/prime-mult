@@ -3,7 +3,7 @@ import torch
 from .models import PreInitMLP
 
 
-def test_pre_init_mlp():
+def test_pre_init_mlp_4bits():
     mlp = PreInitMLP(num_bits=4)
     inputs = torch.tensor(
         [
