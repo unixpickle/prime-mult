@@ -211,7 +211,7 @@ class PreInitMLP(nn.Module):
         """
 
         def bit_function(inputs, bias):
-            result = list(inputs * 2 - bias)
+            result = inputs * 2 - bias
 
             c_cur = inputs[bit_idx * 3]
             p_cur = inputs[bit_idx * 3 + 1]
@@ -229,7 +229,7 @@ class PreInitMLP(nn.Module):
             xor = 1.0 * bias - 2.0 * (c_cur + k_cur)
             result[bit_idx * 3 + 2] = xor
 
-            return torch.stack(result, dim=0)
+            return result
 
         num_pairs = self.num_bits // (2 ** (depth + 1))
         linear_layer = matrix_util.create_linear_layer(bit_function, self.num_bits * 6)
@@ -267,12 +267,9 @@ class PreInitMLP(nn.Module):
             return torch.stack(results, dim=0)
 
         def create_xor(inputs, bias):
-            bits = list(inputs)
-            results = []
-            for i in range(self.num_bits * 2):
-                case1, case2 = bits[i * 2], bits[i * 2 + 1]
-                results.append(bias - 2.0 * (case1 + case2))
-            return torch.stack(results, dim=0)
+            case1 = inputs[::2]
+            case2 = inputs[1::2]
+            return bias - 2.0 * (case1 + case2)
 
         num_pairs = self.num_bits // (2 ** (depth + 1))
         lin_1 = matrix_util.create_linear_layer(create_00_and_11, self.num_bits * 6)

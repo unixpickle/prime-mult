@@ -26,3 +26,7 @@ def test_pre_init_mlp_4bits():
         assert (a == x).all()
     # Outputs should be very saturated.
     assert not (mlp_out.abs() < 1.0).any()
+
+
+def test_pre_init_mlp_create(benchmark):
+    benchmark(lambda: PreInitMLP(8))
