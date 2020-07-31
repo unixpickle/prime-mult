@@ -15,8 +15,16 @@ def named_model(name, num_bits):
         return HardCodedFactorizer(num_bits)
     elif name == "preinit":
         return PreInitMLP(num_bits)
+    elif name == "preinit-reset":
+        module = PreInitMLP(num_bits)
+        module.reset_parameters()
+        return module
     elif name == "preinit-sparse":
         return PreInitMLP(num_bits, sparse=True)
+    elif name == "preinit-sparse-reset":
+        module = PreInitMLP(num_bits, sparse=True)
+        module.reset_parameters()
+        return module
     raise ValueError(f"no such model: {name}")
 
 
@@ -139,6 +147,40 @@ class PreInitMLP(nn.Module):
 
     def forward(self, x):
         return self.network(x)
+
+    def reset_parameters(self):
+        """
+        Randomly initialize the model parameters and rescale them to preserve
+        unit variance throughout the forward pass.
+        """
+        hooks = []
+        stats_mean = {}
+        stats_std = {}
+
+        def hook_method(module, _inputs, outputs):
+            mean = outputs.mean(dim=0)
+            std = outputs.std(dim=0)
+            stats_mean[module] = mean
+            stats_std[module] = std
+            return (outputs - mean) / std
+
+        def setup_module(module):
+            if isinstance(module, nn.Linear):
+                module.reset_parameters()
+                module.bias.detach().zero_()
+                hooks.append(module.register_forward_hook(hook_method))
+
+        self.apply(setup_module)
+
+        # Capture rescaling statistics in one forward pass.
+        self(torch.randn(32, self.num_bits * 2))
+        for hook in hooks:
+            hook.remove()
+
+        for mod, mean in stats_mean.items():
+            std = stats_std[mod]
+            mod.weight.detach().mul_(1 / std[:, None])
+            mod.bias.detach().copy_(-mean / std)
 
     def create_first_layer(self):
         """

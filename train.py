@@ -1,6 +1,7 @@
 import argparse
 import itertools
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
@@ -17,6 +18,7 @@ def main():
     print("Creating model...")
     model = named_model(args.model_name, args.num_bits)
     model.to(device)
+    print(f" - model has {count_parameters(model)} parameters")
     print("Creating iterator...")
     data = iter(
         make_data_loader(args.num_bits, args.batch_size, num_workers=args.data_workers)
@@ -42,6 +44,7 @@ def main():
             f"step {i:06}: loss={loss.item():.3f}"
             f" bit_acc={bit_acc.item():.3f}"
             f" num_acc={num_acc.item():.3f}"
+            f" out_std={outputs.std(0).mean():.3f}"
         )
 
         if i and not i % args.save_interval:
@@ -60,6 +63,10 @@ def compute_number_accuracy(outputs, targets):
     bool_targ = targets > 0.5
     num_correct = (bool_out == bool_targ).long().sum(-1)
     return (num_correct == targets.shape[-1]).float().mean()
+
+
+def count_parameters(model):
+    return sum(int(np.prod(x.shape)) for x in model.parameters())
 
 
 def arg_parser():
