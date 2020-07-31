@@ -15,6 +15,8 @@ def named_model(name, num_bits):
         return HardCodedFactorizer(num_bits)
     elif name == "preinit":
         return PreInitMLP(num_bits)
+    elif name == "preinit-sparse":
+        return PreInitMLP(num_bits, sparse=True)
     raise ValueError(f"no such model: {name}")
 
 
@@ -113,8 +115,11 @@ def _number_to_tensor(num_bits, n):
 
 
 class PreInitMLP(nn.Module):
-    def __init__(self, num_bits, saturation=10.0):
+    def __init__(self, num_bits, saturation=10.0, sparse=False):
         super().__init__()
+        self.num_bits = num_bits
+        self.saturation = saturation
+        self.sparse = sparse
 
         log_bits = 1
         while 2 ** log_bits < num_bits:
@@ -188,7 +193,9 @@ class PreInitMLP(nn.Module):
 
         num_pairs = self.num_bits // (2 ** (depth + 1))
         linear_layer = matrix_util.create_linear_layer(bit_function, self.num_bits * 4)
-        linear_layer = matrix_util.repeat_block_diagonal(linear_layer, num_pairs)
+        linear_layer = matrix_util.repeat_block_diagonal(
+            linear_layer, num_pairs, sparse=self.sparse
+        )
         return nn.Sequential(linear_layer, nn.Sigmoid())
 
     def create_bit_adder_layer(self, depth, bit_idx):
@@ -226,7 +233,9 @@ class PreInitMLP(nn.Module):
 
         num_pairs = self.num_bits // (2 ** (depth + 1))
         linear_layer = matrix_util.create_linear_layer(bit_function, self.num_bits * 6)
-        linear_layer = matrix_util.repeat_block_diagonal(linear_layer, num_pairs)
+        linear_layer = matrix_util.repeat_block_diagonal(
+            linear_layer, num_pairs, sparse=self.sparse
+        )
         return nn.Sequential(linear_layer, nn.Sigmoid())
 
     def create_bit_carry_xor_layer(self, depth):
@@ -267,7 +276,7 @@ class PreInitMLP(nn.Module):
 
         num_pairs = self.num_bits // (2 ** (depth + 1))
         lin_1 = matrix_util.create_linear_layer(create_00_and_11, self.num_bits * 6)
-        lin_1 = matrix_util.repeat_block_diagonal(lin_1, num_pairs)
+        lin_1 = matrix_util.repeat_block_diagonal(lin_1, num_pairs, sparse=self.sparse)
         lin_2 = matrix_util.create_linear_layer(create_xor, self.num_bits * 4)
-        lin_2 = matrix_util.repeat_block_diagonal(lin_2, num_pairs)
+        lin_2 = matrix_util.repeat_block_diagonal(lin_2, num_pairs, sparse=self.sparse)
         return nn.Sequential(lin_1, nn.Sigmoid(), lin_2)

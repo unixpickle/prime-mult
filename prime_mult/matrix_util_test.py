@@ -1,3 +1,5 @@
+import pytest
+
 import torch
 import torch.nn as nn
 
@@ -17,9 +19,10 @@ def test_create_linear_layer():
     assert torch.abs(actual - expected).max().item() < 1e-4
 
 
-def test_repeat_block_diagonal():
+@pytest.mark.parametrize("sparse", [False, True])
+def test_repeat_block_diagonal(sparse):
     layer = nn.Linear(3, 5)
-    rep_layer = repeat_block_diagonal(layer, 3)
+    rep_layer = repeat_block_diagonal(layer, 3, sparse=sparse)
     inputs = torch.randn(7, 9)
     actual = rep_layer(inputs)
     expected = torch.cat(

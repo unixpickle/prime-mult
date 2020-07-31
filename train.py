@@ -14,13 +14,17 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    print("Creating model...")
     model = named_model(args.model_name, args.num_bits)
     model.to(device)
+    print("Creating iterator...")
     data = iter(
         make_data_loader(args.num_bits, args.batch_size, num_workers=args.data_workers)
     )
+    print("Creating optimizer...")
     opt = optim.Adam(model.parameters(), lr=args.lr)
 
+    print("Training...")
     for i in itertools.count():
         inputs, targets = next(data)
         inputs = inputs.to(device)
