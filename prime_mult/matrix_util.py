@@ -56,16 +56,20 @@ class BlockSparseDiagonal(nn.Module):
     def __init__(self, linear_layer, num_blocks):
         super().__init__()
         self.num_blocks = num_blocks
-        num_outputs, num_inputs = linear_layer.weight.shape
-        self.linear_layers = nn.ModuleList(
-            [nn.Linear(num_inputs, num_outputs) for _ in range(num_blocks)]
+        batch_bcast = torch.zeros(num_blocks, 1, 1).to(linear_layer.weight)
+        self.weight = nn.Parameter(
+            linear_layer.weight.detach() + batch_bcast, requires_grad=True
         )
-        for layer in self.linear_layers:
-            layer.weight.detach().copy_(linear_layer.weight.detach())
-            layer.bias.detach().copy_(linear_layer.bias.detach())
+        self.bias = nn.Parameter(
+            linear_layer.bias.detach() + batch_bcast[:, 0], requires_grad=True
+        )
 
     def forward(self, x):
-        split_size = x.shape[-1] // len(self.linear_layers)
-        batches = torch.split(x, split_size, dim=-1)
-        results = [layer(batch) for layer, batch in zip(self.linear_layers, batches)]
-        return torch.cat(results, dim=-1)
+        batch = x.shape[0]
+        x = x.view(batch, self.num_blocks, -1)
+        x = x.permute(1, 0, 2)
+        x = torch.bmm(x, self.weight.permute(0, 2, 1))
+        x = x.permute(1, 0, 2)
+        x = x + self.bias
+        x = x.reshape(batch, -1)
+        return x
