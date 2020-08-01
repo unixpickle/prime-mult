@@ -165,8 +165,9 @@ class PreInitMLP(nn.Module):
             return (outputs - mean) / std
 
         def setup_module(module):
-            if isinstance(module, nn.Linear):
-                module.reset_parameters()
+            classes = [matrix_util.BlockSparseDiagonal, nn.Linear]
+            if any(isinstance(module, c) for c in classes):
+                module.weight.detach().copy_(torch.randn_like(module.weight))
                 module.bias.detach().zero_()
                 hooks.append(module.register_forward_hook(hook_method))
 
@@ -179,8 +180,15 @@ class PreInitMLP(nn.Module):
 
         for mod, mean in stats_mean.items():
             std = stats_std[mod]
-            mod.weight.detach().mul_(1 / std[:, None])
-            mod.bias.detach().copy_(-mean / std)
+            if isinstance(mod, nn.Linear):
+                mod.weight.detach().mul_(1 / std[:, None])
+                mod.bias.detach().copy_(-mean / std)
+            elif isinstance(mod, matrix_util.BlockSparseDiagonal):
+                weight_scale = 1 / std
+                weight_scale = (1 / std).view(mod.num_blocks, -1, 1)
+                mod.weight.detach().mul_(weight_scale)
+                bias_offset = (-mean / std).view(mod.bias.shape)
+                mod.bias.detach().copy_(bias_offset)
 
     def create_first_layer(self):
         """
