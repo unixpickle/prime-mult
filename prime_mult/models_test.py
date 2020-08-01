@@ -1,10 +1,13 @@
+import pytest
+
 import torch
 
 from .models import PreInitMLP
 
 
-def test_pre_init_mlp_4bits():
-    mlp = PreInitMLP(num_bits=4)
+@pytest.mark.parametrize("sparse", [False, True])
+def test_pre_init_mlp_4bits(sparse):
+    mlp = PreInitMLP(num_bits=4, sparse=sparse)
     inputs = torch.tensor(
         [
             [1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0],  # 5 * 7
